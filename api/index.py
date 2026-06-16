@@ -60,8 +60,8 @@ def handle_status():
         return cors(jsonify({"error": "job_id and session_id required"}), 400)
 
     try:
-        _, base_url = _load_config()
-        result = check_job_status(job_id, session_id, base_url, token or None)
+        _t, _b = _load_config()
+        result = check_job_status(job_id, session_id, token or _t, _b)
     except Exception as e:
         return cors(jsonify({"error": type(e).__name__ + ": " + str(e)}), 500)
 
