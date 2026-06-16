@@ -9,6 +9,7 @@ app = Flask(__name__)
 
 
 @app.route("/", methods=["GET"])
+@app.route("/api", methods=["GET"])
 def handle_root():
     return cors(jsonify({
         "message": "Digen Image API",
@@ -21,6 +22,7 @@ def handle_root():
 
 
 @app.route("/generate", methods=["GET", "POST", "OPTIONS"])
+@app.route("/api/generate", methods=["GET", "POST", "OPTIONS"])
 def handle_generate():
     if request.method == "OPTIONS":
         return cors(jsonify({"ok": True}))
@@ -41,16 +43,20 @@ def handle_generate():
     if not prompt:
         return cors(jsonify({"error": "Prompt is required"}), 400)
 
-    if mode == "async":
-        result = submit_only(prompt, model, token or None)
-    else:
-        result = generate(prompt, model, token or None)
+    try:
+        if mode == "async":
+            result = submit_only(prompt, model, token or None)
+        else:
+            result = generate(prompt, model, token or None)
+    except Exception as e:
+        return cors(jsonify({"error": type(e).__name__ + ": " + str(e)}), 500)
 
     code = 200 if result.get("success") else 502
     return cors(jsonify(result), code)
 
 
 @app.route("/status", methods=["GET", "OPTIONS"])
+@app.route("/api/status", methods=["GET", "OPTIONS"])
 def handle_status():
     if request.method == "OPTIONS":
         return cors(jsonify({"ok": True}))
@@ -62,9 +68,26 @@ def handle_status():
     if not job_id or not session_id:
         return cors(jsonify({"error": "job_id and session_id required"}), 400)
 
-    from config import BASE_URL
-    result = check_job_status(job_id, session_id, BASE_URL, token or None)
+    try:
+        from digen_image_api import _load_config
+        _, base_url = _load_config()
+        result = check_job_status(job_id, session_id, base_url, token or None)
+    except Exception as e:
+        return cors(jsonify({"error": type(e).__name__ + ": " + str(e)}), 500)
+
     return cors(jsonify(result))
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return cors(jsonify({
+        "error": "Not found. Available endpoints: /, /generate, /status"
+    }), 404)
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return cors(jsonify({"error": "Internal server error"}), 500)
 
 
 def cors(response, status_code=200):

@@ -189,14 +189,25 @@ def check_job_status(job_id, session_id, base_url, token):
     return {"status": "processing"}
 
 
+def _load_config():
+    token = os.environ.get("DIGEN_TOKEN")
+    base_url = os.environ.get("BASE_URL", "https://api.digen.ai")
+    if not token:
+        try:
+            from config import DIGEN_TOKEN, BASE_URL
+            token = DIGEN_TOKEN
+            base_url = BASE_URL
+        except ImportError:
+            pass
+    return token, base_url
+
+
 def submit_only(prompt, model="flux", token=None, base_url=None):
     """Submit job and return job_id immediately (for async flow)."""
-    if not token:
-        from config import DIGEN_TOKEN
-        token = DIGEN_TOKEN
-    if not base_url:
-        from config import BASE_URL
-        base_url = BASE_URL
+    if not token or not base_url:
+        t, b = _load_config()
+        token = token or t
+        base_url = base_url or b
 
     base_url = base_url.rstrip("/")
     model = model.lower()
@@ -225,12 +236,10 @@ def submit_only(prompt, model="flux", token=None, base_url=None):
 
 def generate(prompt, model="flux", token=None, base_url=None):
     """Submit + poll + return (sync flow)."""
-    if not token:
-        from config import DIGEN_TOKEN
-        token = DIGEN_TOKEN
-    if not base_url:
-        from config import BASE_URL
-        base_url = BASE_URL
+    if not token or not base_url:
+        t, b = _load_config()
+        token = token or t
+        base_url = base_url or b
 
     base_url = base_url.rstrip("/")
     model = model.lower()
