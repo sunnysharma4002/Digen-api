@@ -242,6 +242,5 @@ def generate(prompt, model="flux", token=None, base_url=None):
     if not result["success"]:
         return result
 
-    queue_id = result["queueId"]
-    poll_result = poll_result(queue_id, session_id, token, base_url)
-    return poll_result
+    qid = result["queueId"]
+    return poll_result(qid, session_id, token, base_url)
