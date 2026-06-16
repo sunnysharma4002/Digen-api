@@ -15,112 +15,127 @@ MODELS = {
     "seedream5":   "seedream5",
 }
 
-# set at module level after _load_config
-_token = None
-_base_url = None
+SCENE_ID = "20"
+TASK_TYPE = 1
 
 
 def generate_uuid():
     return str(uuid.uuid4())
 
 
-def build_headers(session_id, token, content_type="application/json"):
-    return {
-        "Content-Type": content_type,
+def get_code(session_id, token, base_url):
+    """Get per-session code from scene_info endpoint."""
+    headers = {
+        "Content-Type": "application/json",
+        "Digen-Language": "en",
+        "Digen-SessionID": session_id,
+        "Digen-Token": token,
+    }
+    try:
+        r = requests.post(f"{base_url}/v1/user/scene_info",
+                          json={}, headers=headers, timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("errCode") == 0:
+                return data.get("data", {}).get("code", "")
+    except Exception:
+        pass
+    return None
+
+
+def build_body(prompt, model_val, code):
+    """Build the full request body for image generation."""
+    scene_params = json.dumps({
+        "cid": "1",
+        "generation_type": "2",
+        "model_type": "2",
+        "is_public": "1",
+        "engine": model_val,
+        "prompt": prompt,
+        "code": code,
+    })
+    return json.dumps({
+        "scene_id": SCENE_ID,
+        "model": model_val,
+        "title": prompt[:50],
+        "task_type": TASK_TYPE,
+        "scene_params": scene_params,
+    })
+
+
+def submit_job(prompt, model_val, session_id, token, base_url):
+    """Submit image generation job, return queueId or error."""
+    code = get_code(session_id, token, base_url)
+    if not code:
+        return {"success": False, "error": "Failed to get scene code"}
+
+    body = build_body(prompt, model_val, code)
+    headers = {
+        "Content-Type": "application/json",
         "Digen-Language": "en",
         "Digen-SessionID": session_id,
         "Digen-Token": token,
     }
 
-
-def submit_job(prompt, model, token, base_url, session_id):
-    body = json.dumps({"model": model, "prompt": prompt})
-    headers = build_headers(session_id, token)
-
     try:
         r = requests.post(f"{base_url}/v1/scene/job/submitv1",
                           data=body, headers=headers, timeout=60)
         if r.status_code != 200:
-            return {"success": False, "error": f"HTTP {r.status_code}"}
+            return {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
 
         data = r.json()
-        if data.get("errCode") != 0:
-            return {"success": False, "error": data.get("errMsg", "API error")}
+        ec = data.get("errCode")
+        if ec != 0:
+            return {"success": False, "error": data.get("errMsg", f"API error {ec}")}
 
-        d = data.get("data")
-        if isinstance(d, str):
-            if d.startswith("http"):
-                return {"success": True, "url": d}
-            return {"success": True, "queueId": str(d)}
+        qid = data.get("data", {}).get("queueId", "")
+        if not qid:
+            return {"success": False, "error": f"No queueId in response: {r.text[:200]}"}
 
-        if isinstance(d, dict):
-            url = (d.get("url") or d.get("image_url")
-                   or d.get("output") or d.get("result")
-                   or d.get("imgUrl"))
-            if url:
-                return {"success": True, "url": url}
-            qid = d.get("queueId") or d.get("id") or d.get("job_id")
-            if qid:
-                return {"success": True, "queueId": str(qid)}
-
-        url = (data.get("url") or data.get("image_url")
-               or data.get("output") or data.get("result"))
-        if url:
-            return {"success": True, "url": url}
-
-        return {"success": False, "error": f"Unexpected response: {json.dumps(data)}"}
-
+        return {"success": True, "queueId": str(qid)}
     except requests.exceptions.Timeout:
         return {"success": False, "error": "Request timeout"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def poll_for_result(queue_id, session_id, token, base_url, max_attempts=30):
-    headers = {"Content-Type": "application/json",
-               "Digen-Language": "en",
-               "Digen-SessionID": session_id}
+def poll_result(queue_id, session_id, token, base_url, max_attempts=30):
+    """Poll for completed job with image URL."""
+    headers_poll = {
+        "Content-Type": "application/json",
+        "Digen-Language": "en",
+        "Digen-SessionID": session_id,
+        "Digen-Token": token,
+    }
 
     for i in range(max_attempts):
         time.sleep(5)
 
         try:
             r = requests.get(
-                f"{base_url}/v1/queue/list?page=0&pageSize=10&status=2",
-                headers=headers, timeout=30)
+                f"{base_url}/v1/queue/list?page=0&pageSize=50&status=2",
+                headers=headers_poll, timeout=30)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("errCode") == 0:
-                    items = (data.get("data", {}).get("list")
-                             or data.get("data") or [])
-                    if isinstance(items, list):
-                        for item in items:
-                            item_id = str(item.get("id") or item.get("job_id") or "")
-                            if item_id == queue_id:
-                                output = (item.get("output")
-                                          or item.get("video_url")
-                                          or item.get("result"))
-                                if output:
-                                    return {"success": True, "imageUrl": output}
+                    items = data.get("data", {}).get("list", [])
+                    for item in items:
+                        iid = str(item.get("id", ""))
+                        if iid == queue_id:
+                            output = (item.get("output")
+                                      or item.get("video_url")
+                                      or item.get("result"))
+                            if output:
+                                return {"success": True, "imageUrl": output}
 
             r2 = requests.post(
                 f"{base_url}/v1/tools/get_url",
-                data=json.dumps({"jobID": queue_id}),
-                headers={**headers, "Digen-Token": token},
-                timeout=30)
+                json={"jobID": queue_id},
+                headers=headers_poll, timeout=30)
             if r2.status_code == 200:
                 text = r2.text.strip().strip('"')
                 if text.startswith("http"):
                     return {"success": True, "imageUrl": text}
-                try:
-                    data2 = r2.json()
-                    if isinstance(data2, dict):
-                        url = (data2.get("url") or data2.get("data")
-                               or data2.get("result"))
-                        if url and isinstance(url, str) and url.startswith("http"):
-                            return {"success": True, "imageUrl": url}
-                except json.JSONDecodeError:
-                    pass
         except Exception:
             pass
 
@@ -128,37 +143,38 @@ def poll_for_result(queue_id, session_id, token, base_url, max_attempts=30):
 
 
 def check_job_status(queue_id, session_id, token, base_url):
-    headers = {"Content-Type": "application/json",
-               "Digen-Language": "en",
-               "Digen-SessionID": session_id}
+    """One-shot status check for async polling."""
+    headers = {
+        "Content-Type": "application/json",
+        "Digen-Language": "en",
+        "Digen-SessionID": session_id,
+        "Digen-Token": token,
+    }
 
     try:
         r = requests.get(
-            f"{base_url}/v1/queue/list?page=0&pageSize=10&status=2",
+            f"{base_url}/v1/queue/list?page=0&pageSize=50&status=2",
             headers=headers, timeout=30)
         if r.status_code == 200:
             data = r.json()
             if data.get("errCode") == 0:
-                items = (data.get("data", {}).get("list")
-                         or data.get("data") or [])
-                if isinstance(items, list):
-                    for item in items:
-                        item_id = str(item.get("id") or item.get("job_id") or "")
-                        if item_id == queue_id:
-                            output = (item.get("output")
-                                      or item.get("video_url")
-                                      or item.get("result"))
-                            if output:
-                                return {"status": "completed", "image_url": output}
+                items = data.get("data", {}).get("list", [])
+                for item in items:
+                    iid = str(item.get("id", ""))
+                    if iid == queue_id:
+                        output = (item.get("output")
+                                  or item.get("video_url")
+                                  or item.get("result"))
+                        if output:
+                            return {"status": "completed", "image_url": output}
     except Exception:
         pass
 
     try:
         r = requests.post(
             f"{base_url}/v1/tools/get_url",
-            data=json.dumps({"jobID": queue_id}),
-            headers={**headers, "Digen-Token": token},
-            timeout=30)
+            json={"jobID": queue_id},
+            headers=headers, timeout=30)
         if r.status_code == 200:
             text = r.text.strip().strip('"')
             if text.startswith("http"):
@@ -170,36 +186,35 @@ def check_job_status(queue_id, session_id, token, base_url):
 
 
 def _load_config():
-    global _token, _base_url
-    _token = os.environ.get("DIGEN_TOKEN")
-    _base_url = os.environ.get("BASE_URL", "https://api.digen.ai")
-    if not _token:
+    token = os.environ.get("DIGEN_TOKEN")
+    base_url = os.environ.get("BASE_URL", "https://api.digen.ai")
+    if not token:
         try:
             from config import DIGEN_TOKEN, BASE_URL
-            _token = DIGEN_TOKEN
-            _base_url = BASE_URL
+            token = DIGEN_TOKEN
+            base_url = BASE_URL
         except ImportError:
             pass
-    return _token, _base_url
+    return token, base_url
 
 
 def submit_only(prompt, model="flux", token=None, base_url=None):
-    _token_local, _base_url_local = _load_config()
-    token = token or _token_local
-    base_url = (base_url or _base_url_local).rstrip("/")
+    """Submit job, return queueId immediately (async)."""
+    _token, _base_url = _load_config()
+    token = token or _token
+    base_url = (base_url or _base_url).rstrip("/")
 
     if not token:
-        return {"success": False, "error": "DIGEN_TOKEN not configured"}
+        return {"success": False, "error": "DIGEN_TOKEN required"}
 
-    model_val = MODELS.get(model.lower(), MODELS["flux"])
+    model_val = MODELS.get(model.lower())
+    if not model_val:
+        return {"success": False, "error": f"Unknown model: {model}"}
+
     session_id = generate_uuid()
-
-    result = submit_job(prompt, model_val, token, base_url, session_id)
+    result = submit_job(prompt, model_val, session_id, token, base_url)
     if not result["success"]:
         return result
-
-    if "url" in result:
-        return {"success": True, "image_url": result["url"], "session_id": session_id}
 
     return {
         "success": True,
@@ -210,23 +225,23 @@ def submit_only(prompt, model="flux", token=None, base_url=None):
 
 
 def generate(prompt, model="flux", token=None, base_url=None):
-    _token_local, _base_url_local = _load_config()
-    token = token or _token_local
-    base_url = (base_url or _base_url_local).rstrip("/")
+    """Submit + poll (sync)."""
+    _token, _base_url = _load_config()
+    token = token or _token
+    base_url = (base_url or _base_url).rstrip("/")
 
     if not token:
-        return {"success": False, "error": "DIGEN_TOKEN not configured"}
+        return {"success": False, "error": "DIGEN_TOKEN required"}
 
-    model_val = MODELS.get(model.lower(), MODELS["flux"])
+    model_val = MODELS.get(model.lower())
+    if not model_val:
+        return {"success": False, "error": f"Unknown model: {model}"}
+
     session_id = generate_uuid()
-
-    result = submit_job(prompt, model_val, token, base_url, session_id)
+    result = submit_job(prompt, model_val, session_id, token, base_url)
     if not result["success"]:
         return result
 
-    if "url" in result:
-        return {"success": True, "image_url": result["url"]}
-
     queue_id = result["queueId"]
-    poll_result = poll_for_result(queue_id, session_id, token, base_url)
+    poll_result = poll_result(queue_id, session_id, token, base_url)
     return poll_result
