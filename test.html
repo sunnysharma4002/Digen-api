@@ -9,6 +9,7 @@ select,input{width:100%}
 button{padding:10px 30px;margin-top:10px}
 pre{background:#f5f5f5;padding:10px;overflow:auto}
 img{max-width:100%;margin-top:10px}
+.hidden{display:none}
 </style>
 </head>
 <body>
@@ -27,37 +28,79 @@ img{max-width:100%;margin-top:10px}
 <option value="gpt-image2">GPT Image 2</option>
 <option value="seedream5">SeaDream 5</option>
 </select>
+<label>Mode:</label>
+<select id="mode">
+<option value="sync">Sync (wait for result)</option>
+<option value="async">Async (get job_id, poll manually)</option>
+</select>
 <label>Token (leave blank to use config):</label>
 <input type="text" id="token" placeholder="optional">
 <button type="submit">Generate Image</button>
 </form>
 <pre id="result"></pre>
+<div id="poll" class="hidden">
+<button onclick="pollStatus()">Check Status</button>
+<pre id="pollResult"></pre>
+</div>
 <div id="image"></div>
 
 <script>
+let lastJobId = null;
+let lastSessionId = null;
+let lastToken = null;
+
 document.getElementById('form').onsubmit = async function(e) {
     e.preventDefault();
     const prompt = document.getElementById('prompt').value;
     const model = document.getElementById('model').value;
+    const mode = document.getElementById('mode').value;
     const token = document.getElementById('token').value;
     const resultEl = document.getElementById('result');
     const imgEl = document.getElementById('image');
+    const pollDiv = document.getElementById('poll');
     resultEl.textContent = 'Generating...';
     imgEl.innerHTML = '';
+    pollDiv.classList.add('hidden');
 
     try {
-        let url = '/api/generate?prompt=' + encodeURIComponent(prompt) + '&model=' + encodeURIComponent(model);
-        if (token) url += '&token=' + encodeURIComponent(token);
+        let url = `/api/generate?prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}&mode=${mode}`;
+        if (token) url += `&token=${encodeURIComponent(token)}`;
         const res = await fetch(url);
         const data = await res.json();
         resultEl.textContent = JSON.stringify(data, null, 2);
+
         if (data.success && data.image_url) {
             imgEl.innerHTML = '<img src="' + data.image_url + '" alt="Generated Image">';
+        }
+        if (data.job_id) {
+            lastJobId = data.job_id;
+            lastSessionId = data.session_id;
+            lastToken = token;
+            pollDiv.classList.remove('hidden');
+            document.getElementById('pollResult').textContent = '';
         }
     } catch (err) {
         resultEl.textContent = 'Error: ' + err.message;
     }
 };
+
+async function pollStatus() {
+    if (!lastJobId || !lastSessionId) return;
+    const el = document.getElementById('pollResult');
+    el.textContent = 'Checking...';
+    try {
+        let url = `/api/status?job_id=${lastJobId}&session_id=${lastSessionId}`;
+        if (lastToken) url += `&token=${lastToken}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        el.textContent = JSON.stringify(data, null, 2);
+        if (data.status === 'completed' && data.image_url) {
+            document.getElementById('image').innerHTML = '<img src="' + data.image_url + '" alt="Generated Image">';
+        }
+    } catch (err) {
+        el.textContent = 'Error: ' + err.message;
+    }
+}
 </script>
 </body>
 </html>

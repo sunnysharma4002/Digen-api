@@ -1,12 +1,9 @@
 import os
 import sys
-import json
-
-# Ensure parent dir is on path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, request, jsonify
-from digen_image_api import generate
+from digen_image_api import generate, submit_only, check_job_status, MODELS
 
 app = Flask(__name__)
 
@@ -14,38 +11,58 @@ app = Flask(__name__)
 @app.route("/api/generate", methods=["GET", "POST", "OPTIONS"])
 def handle_generate():
     if request.method == "OPTIONS":
-        return cors_response(jsonify({"ok": True}))
+        return cors(jsonify({"ok": True}))
 
-    prompt = (request.args.get("prompt")
-              or (request.json or {}).get("prompt")
-              or "").strip()
-    model = (request.args.get("model")
-             or (request.json or {}).get("model")
-             or "flux").strip()
-    token = (request.args.get("token")
-             or (request.json or {}).get("token")
-             or "").strip()
+    prompt = _get_param("prompt")
+    model = _get_param("model", "flux")
+    token = _get_param("token", "")
+    mode = _get_param("mode", "sync")  # 'sync' or 'async'
 
     if not prompt:
-        return cors_response(jsonify({"error": "Prompt is required"}), 400)
+        return cors(jsonify({"error": "Prompt is required"}), 400)
 
-    result = generate(prompt, model, token if token else None)
+    if mode == "async":
+        result = submit_only(prompt, model, token or None)
+    else:
+        result = generate(prompt, model, token or None)
 
-    resp = jsonify(result)
-    return cors_response(resp, 200 if result.get("success") else 502)
+    code = 200 if result.get("success") else 502
+    return cors(jsonify(result), code)
+
+
+@app.route("/api/status", methods=["GET", "OPTIONS"])
+def handle_status():
+    if request.method == "OPTIONS":
+        return cors(jsonify({"ok": True}))
+
+    job_id = _get_param("job_id")
+    session_id = _get_param("session_id")
+    token = _get_param("token", "")
+
+    if not job_id or not session_id:
+        return cors(jsonify({"error": "job_id and session_id required"}), 400)
+
+    from config import BASE_URL
+    result = check_job_status(job_id, session_id, BASE_URL, token or None)
+    return cors(jsonify(result))
 
 
 @app.route("/api", methods=["GET"])
 def handle_root():
-    return cors_response(jsonify({
+    return cors(jsonify({
         "message": "Digen Image API",
-        "usage": "GET /api/generate?prompt=...&model=flux",
-        "models": ["flux", "flux2", "flux2-klein", "zimage",
-                   "sora-image", "gpt-image", "gpt-image2", "seedream5"],
+        "usage": "GET /api/generate?prompt=...&model=flux&mode=sync|async",
+        "models": list(MODELS.keys()),
     }))
 
 
-def cors_response(response, status_code=200):
+def _get_param(name, default=""):
+    return (request.args.get(name)
+            or (request.json or {}).get(name)
+            or default).strip()
+
+
+def cors(response, status_code=200):
     response.status_code = status_code
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -53,5 +70,4 @@ def cors_response(response, status_code=200):
     return response
 
 
-# Vercel handler
 handler = app

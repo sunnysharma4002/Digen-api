@@ -102,7 +102,6 @@ def poll_for_result(job_id, session_id, base_url, token, max_attempts=30):
     for i in range(max_attempts):
         time.sleep(5)
 
-        # Try /v1/queue/list
         try:
             r = requests.get(
                 f"{base_url}/v1/queue/list?page=0&pageSize=10&status=2",
@@ -124,7 +123,6 @@ def poll_for_result(job_id, session_id, base_url, token, max_attempts=30):
         except Exception:
             pass
 
-        # Try /v1/tools/get_url
         try:
             r = requests.post(
                 f"{base_url}/v1/tools/get_url",
@@ -150,39 +148,83 @@ def poll_for_result(job_id, session_id, base_url, token, max_attempts=30):
     return {"success": False, "error": "Timeout waiting for generation"}
 
 
-def download_image(image_url):
-    if not image_url.startswith("http"):
-        return image_url
+def check_job_status(job_id, session_id, base_url, token):
+    """One-shot status check (for async polling)."""
+    headers = build_headers(session_id, token)
 
     try:
-        r = requests.get(image_url, stream=True, timeout=60)
-        if r.status_code != 200:
-            return image_url
-
-        uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
-        os.makedirs(uploads_dir, exist_ok=True)
-
-        content_type = r.headers.get("Content-Type", "")
-        if "png" in content_type:
-            ext = ".png"
-        elif "webp" in content_type:
-            ext = ".webp"
-        elif "gif" in content_type:
-            ext = ".gif"
-        else:
-            ext = ".jpg"
-
-        filename = f"digen_{int(time.time())}_{uuid.uuid4().hex[:8]}{ext}"
-        filepath = os.path.join(uploads_dir, filename)
-        with open(filepath, "wb") as f:
-            f.write(r.content)
-
-        return image_url  # Return original URL; local path stored separately
+        r = requests.get(
+            f"{base_url}/v1/queue/list?page=0&pageSize=10&status=2",
+            headers=headers, timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("errCode") == 0:
+                items = (data.get("data", {}).get("list")
+                         or data.get("data") or [])
+                if isinstance(items, list):
+                    for item in items:
+                        item_id = str(item.get("id") or item.get("job_id") or "")
+                        if item_id == str(job_id):
+                            output = (item.get("output")
+                                      or item.get("video_url")
+                                      or item.get("result"))
+                            if output:
+                                return {"status": "completed", "image_url": output}
     except Exception:
-        return image_url
+        pass
+
+    try:
+        r = requests.post(
+            f"{base_url}/v1/tools/get_url",
+            data=json.dumps({"jobID": job_id}),
+            headers={**headers, "Content-Type": "application/json"},
+            timeout=30)
+        if r.status_code == 200:
+            text = r.text.strip().strip('"')
+            if text.startswith("http"):
+                return {"status": "completed", "image_url": text}
+    except Exception:
+        pass
+
+    return {"status": "processing"}
+
+
+def submit_only(prompt, model="flux", token=None, base_url=None):
+    """Submit job and return job_id immediately (for async flow)."""
+    if not token:
+        from config import DIGEN_TOKEN
+        token = DIGEN_TOKEN
+    if not base_url:
+        from config import BASE_URL
+        base_url = BASE_URL
+
+    base_url = base_url.rstrip("/")
+    model = model.lower()
+    config = MODELS.get(model, MODELS["flux"])
+    session_id = generate_uuid()
+
+    scene_info = get_scene_info(session_id, base_url, token)
+    if not scene_info or not scene_info.get("code"):
+        return {"success": False, "error": "Failed to get scene info. Check your token."}
+
+    code = scene_info["code"]
+
+    for scene_id in SCENE_IDS_TO_TRY:
+        result = submit_job(prompt, config, code, session_id,
+                            scene_id, base_url, token)
+        if result["success"]:
+            return {
+                "success": True,
+                "job_id": result["jobId"],
+                "session_id": session_id,
+                "status": "processing"
+            }
+
+    return {"success": False, "error": "All scene IDs failed to submit"}
 
 
 def generate(prompt, model="flux", token=None, base_url=None):
+    """Submit + poll + return (sync flow)."""
     if not token:
         from config import DIGEN_TOKEN
         token = DIGEN_TOKEN
@@ -210,7 +252,6 @@ def generate(prompt, model="flux", token=None, base_url=None):
             poll_result = poll_for_result(job_id, session_id, base_url, token)
             if poll_result["success"]:
                 image_url = poll_result["imageUrl"]
-                download_image(image_url)
                 return {"success": True, "image_url": image_url}
             last_error = poll_result["error"]
         else:
