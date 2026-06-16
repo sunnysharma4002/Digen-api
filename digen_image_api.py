@@ -43,11 +43,14 @@ def submit_job(prompt, model_config, session_id, token, base_url):
         "width": 1024,
         "height": 1024,
         "batch_size": model_config["batch_size"],
+        "strength": "0.9",
+        "lora_id": "",
+        "reference_images": [],
     }
 
     headers = build_headers(session_id, token)
     try:
-        r = requests.post(f"{base_url}/v2/tools/images_generations",
+        r = requests.post(f"{base_url}/v2/tools/text_to_image",
                           json=cfg, headers=headers, timeout=60)
         if r.status_code != 200:
             return {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
