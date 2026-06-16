@@ -63,7 +63,7 @@ document.getElementById('form').onsubmit = async function(e) {
     pollDiv.classList.add('hidden');
 
     try {
-        let url = `/api/generate?prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}&mode=${mode}`;
+        let url = `/generate?prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}&mode=${mode}`;
         if (token) url += `&token=${encodeURIComponent(token)}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -89,7 +89,7 @@ async function pollStatus() {
     const el = document.getElementById('pollResult');
     el.textContent = 'Checking...';
     try {
-        let url = `/api/status?job_id=${lastJobId}&session_id=${lastSessionId}`;
+        let url = `/status?job_id=${lastJobId}&session_id=${lastSessionId}`;
         if (lastToken) url += `&token=${lastToken}`;
         const res = await fetch(url);
         const data = await res.json();
