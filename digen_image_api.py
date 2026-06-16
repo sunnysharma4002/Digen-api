@@ -43,7 +43,6 @@ def submit_job(prompt, model_config, session_id, token, base_url):
         "width": 1024,
         "height": 1024,
         "batch_size": model_config["batch_size"],
-        "strength": 0.9,
     }
 
     headers = build_headers(session_id, token)
