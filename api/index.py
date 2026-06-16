@@ -18,6 +18,7 @@ def handle_root():
             "status": "/api/status?job_id=...&session_id=..."
         },
         "models": list(MODELS.keys()),
+        "note": "Flux Dev free tier: batch_size=4, can't submit concurrently",
     }))
 
 

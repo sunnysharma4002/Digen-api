@@ -5,183 +5,122 @@ import time
 import requests
 
 MODELS = {
-    "flux":        "flux",
-    "flux2":       "flux2",
-    "flux2-klein": "flux2-klein",
-    "zimage":      "zimage",
-    "sora-image":  "sora-image",
-    "gpt-image":   "gpt-image-1.5",
-    "gpt-image2":  "gpt-image2",
-    "seedream5":   "seedream5",
+    "flux":              {"model": "flux", "batch_size": 4},
+    "flux2":             {"model": "flux2", "batch_size": 1},
+    "flux2-klein":       {"model": "flux2-klein", "batch_size": 4},
+    "flux-schnell":      {"model": "black-forest-labs/FLUX.1-schnell", "batch_size": 1},
+    "zimage":            {"model": "zimage", "batch_size": 2},
+    "sora-image":        {"model": "sora-image", "batch_size": 1},
+    "gpt-image":         {"model": "gpt-image-1.5", "batch_size": 1},
+    "gpt-image2":        {"model": "gpt-image2", "batch_size": 1},
+    "seedream5":         {"model": "seedream5", "batch_size": 5},
+    "nano-banana":       {"model": "nano_banana1", "batch_size": 1},
+    "nano-banana2":      {"model": "nano_banana2", "batch_size": 1},
+    "nano-banana2-r":    {"model": "nano_banana2_r", "batch_size": 1},
+    "image-motion":      {"model": "image_motion", "batch_size": 1},
 }
-
-SCENE_ID = "20"
-TASK_TYPE = 1
 
 
 def generate_uuid():
     return str(uuid.uuid4())
 
 
-def get_code(session_id, token, base_url):
-    """Get per-session code from scene_info endpoint."""
-    headers = {
+def build_headers(session_id, token):
+    return {
         "Content-Type": "application/json",
         "Digen-Language": "en",
         "Digen-SessionID": session_id,
         "Digen-Token": token,
     }
-    try:
-        r = requests.post(f"{base_url}/v1/user/scene_info",
-                          json={}, headers=headers, timeout=30)
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("errCode") == 0:
-                return data.get("data", {}).get("code", "")
-    except Exception:
-        pass
-    return None
 
 
-def build_body(prompt, model_val, code):
-    """Build the full request body for image generation."""
-    scene_params = json.dumps({
-        "cid": "1",
-        "generation_type": "2",
-        "model_type": "2",
-        "is_public": "1",
-        "engine": model_val,
+def submit_job(prompt, model_config, session_id, token, base_url):
+    """Submit image generation job to /v2/tools/images_generations."""
+    cfg = {
+        "model": model_config["model"],
         "prompt": prompt,
-        "code": code,
-    })
-    return json.dumps({
-        "scene_id": SCENE_ID,
-        "model": model_val,
-        "title": prompt[:50],
-        "task_type": TASK_TYPE,
-        "scene_params": scene_params,
-    })
-
-
-def submit_job(prompt, model_val, session_id, token, base_url):
-    """Submit image generation job, return queueId or error."""
-    code = get_code(session_id, token, base_url)
-    if not code:
-        return {"success": False, "error": "Failed to get scene code"}
-
-    body = build_body(prompt, model_val, code)
-    headers = {
-        "Content-Type": "application/json",
-        "Digen-Language": "en",
-        "Digen-SessionID": session_id,
-        "Digen-Token": token,
+        "image_size": "1024x1024",
+        "width": 1024,
+        "height": 1024,
+        "batch_size": model_config["batch_size"],
+        "strength": 0.9,
     }
 
+    headers = build_headers(session_id, token)
     try:
-        r = requests.post(f"{base_url}/v1/scene/job/submitv1",
-                          data=body, headers=headers, timeout=60)
+        r = requests.post(f"{base_url}/v2/tools/images_generations",
+                          json=cfg, headers=headers, timeout=60)
         if r.status_code != 200:
             return {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
 
         data = r.json()
-        ec = data.get("errCode")
-        if ec != 0:
-            return {"success": False, "error": data.get("errMsg", f"API error {ec}")}
+        if data.get("errCode") != 0:
+            return {"success": False, "error": data.get("errMsg", f"API error {data.get('errCode')}")}
 
-        qid = data.get("data", {}).get("queueId", "")
-        if not qid:
-            return {"success": False, "error": f"No queueId in response: {r.text[:200]}"}
+        d = data.get("data", {})
+        task_id = d.get("id") or d.get("itemId") or ""
+        if not task_id:
+            return {"success": False, "error": f"No task id in response: {r.text[:200]}"}
 
-        return {"success": True, "queueId": str(qid)}
+        return {"success": True, "taskId": str(task_id)}
     except requests.exceptions.Timeout:
         return {"success": False, "error": "Request timeout"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def poll_result(queue_id, session_id, token, base_url, max_attempts=30):
-    """Poll for completed job with image URL."""
-    headers_poll = {
-        "Content-Type": "application/json",
-        "Digen-Language": "en",
-        "Digen-SessionID": session_id,
-        "Digen-Token": token,
-    }
+def poll_result(task_id, session_id, token, base_url, max_attempts=120):
+    """Poll for result using /v6/video/get_task_v2."""
+    headers = build_headers(session_id, token)
 
     for i in range(max_attempts):
         time.sleep(5)
 
         try:
-            r = requests.get(
-                f"{base_url}/v1/queue/list?page=0&pageSize=50&status=2",
-                headers=headers_poll, timeout=30)
+            r = requests.post(f"{base_url}/v6/video/get_task_v2",
+                              json={"jobId": task_id},
+                              headers=headers, timeout=30)
             if r.status_code == 200:
                 data = r.json()
-                if data.get("errCode") == 0:
-                    items = data.get("data", {}).get("list", [])
-                    for item in items:
-                        iid = str(item.get("id", ""))
-                        if iid == queue_id:
-                            output = (item.get("output")
-                                      or item.get("video_url")
-                                      or item.get("result"))
-                            if output:
-                                return {"success": True, "imageUrl": output}
+                if data.get("errCode") != 0:
+                    continue
 
-            r2 = requests.post(
-                f"{base_url}/v1/tools/get_url",
-                json={"jobID": queue_id},
-                headers=headers_poll, timeout=30)
-            if r2.status_code == 200:
-                text = r2.text.strip().strip('"')
-                if text.startswith("http"):
-                    return {"success": True, "imageUrl": text}
+                d = data.get("data", {})
+                status = d.get("status")
+
+                if status == 3:  # SUCCESS
+                    urls = d.get("resource_urls", [])
+                    if urls:
+                        return {"success": True, "imageUrl": urls[0]}
+                elif status == 4:  # FAILED
+                    return {"success": False, "error": "Generation failed"}
         except Exception:
             pass
 
     return {"success": False, "error": "Timeout waiting for generation"}
 
 
-def check_job_status(queue_id, session_id, token, base_url):
+def check_job_status(task_id, session_id, token, base_url):
     """One-shot status check for async polling."""
-    headers = {
-        "Content-Type": "application/json",
-        "Digen-Language": "en",
-        "Digen-SessionID": session_id,
-        "Digen-Token": token,
-    }
-
+    headers = build_headers(session_id, token)
     try:
-        r = requests.get(
-            f"{base_url}/v1/queue/list?page=0&pageSize=50&status=2",
-            headers=headers, timeout=30)
+        r = requests.post(f"{base_url}/v6/video/get_task_v2",
+                          json={"jobId": task_id},
+                          headers=headers, timeout=30)
         if r.status_code == 200:
             data = r.json()
             if data.get("errCode") == 0:
-                items = data.get("data", {}).get("list", [])
-                for item in items:
-                    iid = str(item.get("id", ""))
-                    if iid == queue_id:
-                        output = (item.get("output")
-                                  or item.get("video_url")
-                                  or item.get("result"))
-                        if output:
-                            return {"status": "completed", "image_url": output}
+                d = data.get("data", {})
+                status = d.get("status")
+                if status == 3:
+                    urls = d.get("resource_urls", [])
+                    if urls:
+                        return {"status": "completed", "image_url": urls[0]}
+                elif status == 4:
+                    return {"status": "failed", "error": "Generation failed"}
+                return {"status": "processing"}
     except Exception:
         pass
-
-    try:
-        r = requests.post(
-            f"{base_url}/v1/tools/get_url",
-            json={"jobID": queue_id},
-            headers=headers, timeout=30)
-        if r.status_code == 200:
-            text = r.text.strip().strip('"')
-            if text.startswith("http"):
-                return {"status": "completed", "image_url": text}
-    except Exception:
-        pass
-
     return {"status": "processing"}
 
 
@@ -199,7 +138,7 @@ def _load_config():
 
 
 def submit_only(prompt, model="flux", token=None, base_url=None):
-    """Submit job, return queueId immediately (async)."""
+    """Submit image job, return taskId immediately (async)."""
     _token, _base_url = _load_config()
     token = token or _token
     base_url = (base_url or _base_url).rstrip("/")
@@ -207,25 +146,25 @@ def submit_only(prompt, model="flux", token=None, base_url=None):
     if not token:
         return {"success": False, "error": "DIGEN_TOKEN required"}
 
-    model_val = MODELS.get(model.lower())
-    if not model_val:
+    model_config = MODELS.get(model.lower())
+    if not model_config:
         return {"success": False, "error": f"Unknown model: {model}"}
 
     session_id = generate_uuid()
-    result = submit_job(prompt, model_val, session_id, token, base_url)
+    result = submit_job(prompt, model_config, session_id, token, base_url)
     if not result["success"]:
         return result
 
     return {
         "success": True,
-        "job_id": result["queueId"],
+        "job_id": result["taskId"],
         "session_id": session_id,
         "status": "processing"
     }
 
 
 def generate(prompt, model="flux", token=None, base_url=None):
-    """Submit + poll (sync)."""
+    """Submit image and poll for result (sync)."""
     _token, _base_url = _load_config()
     token = token or _token
     base_url = (base_url or _base_url).rstrip("/")
@@ -233,14 +172,13 @@ def generate(prompt, model="flux", token=None, base_url=None):
     if not token:
         return {"success": False, "error": "DIGEN_TOKEN required"}
 
-    model_val = MODELS.get(model.lower())
-    if not model_val:
+    model_config = MODELS.get(model.lower())
+    if not model_config:
         return {"success": False, "error": f"Unknown model: {model}"}
 
     session_id = generate_uuid()
-    result = submit_job(prompt, model_val, session_id, token, base_url)
+    result = submit_job(prompt, model_config, session_id, token, base_url)
     if not result["success"]:
         return result
 
-    qid = result["queueId"]
-    return poll_result(qid, session_id, token, base_url)
+    return poll_result(result["taskId"], session_id, token, base_url)
