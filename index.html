@@ -442,6 +442,14 @@
             debugJson.textContent = JSON.stringify(data, null, 2);
         }
 
+        /**
+         * Extract the image URL from the API response.
+         * The API may return either `image_url` (snake_case) or `imageUrl` (camelCase).
+         */
+        function getImageUrl(data) {
+            return data.image_url || data.imageUrl || null;
+        }
+
         // ── Submit ──
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -467,8 +475,9 @@
 
                 showDebug(data);
 
-                if (data.success && data.image_url) {
-                    showImage(data.image_url);
+                const imageUrl = getImageUrl(data);
+                if (data.success && imageUrl) {
+                    showImage(imageUrl);
                 } else if (data.job_id) {
                     // Async mode — start polling
                     loadingText.textContent = 'Image is being generated... (polling)';
@@ -512,8 +521,12 @@
 
                     showDebug(data);
 
-                    if (data.status === 'completed' && data.image_url) {
-                        showImage(data.image_url);
+                    // Accept both snake_case and camelCase
+                    const imageUrl = getImageUrl(data);
+                    const status = data.status || '';
+
+                    if (status === 'completed' && imageUrl) {
+                        showImage(imageUrl);
                         return;
                     }
 

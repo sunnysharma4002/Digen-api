@@ -2,15 +2,21 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from digen_image_api import generate, submit_only, check_job_status, _load_config, MODELS
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 
 
 @app.route("/", methods=["GET"])
-@app.route("/api", methods=["GET"])
 def handle_root():
+    """Serve the main index.html page."""
+    return send_from_directory(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "index.html")
+
+
+@app.route("/api", methods=["GET"])
+def handle_api_info():
     return cors(jsonify({
         "message": "Digen Image API",
         "endpoints": {
@@ -84,3 +90,7 @@ def cors(response, status_code=200):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5001, debug=True)
