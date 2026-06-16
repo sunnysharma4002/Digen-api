@@ -89,13 +89,19 @@ def poll_result(task_id, session_id, token, base_url, max_attempts=120):
 
                 d = data.get("data", {})
                 status = d.get("status")
+                urls = d.get("resource_urls", [])
 
-                if status == 3:  # SUCCESS
-                    urls = d.get("resource_urls", [])
-                    if urls:
-                        return {"success": True, "imageUrl": urls[0]}
-                elif status == 4:  # FAILED
-                    return {"success": False, "error": "Generation failed"}
+                # Status 3 or 4 = success on v2 API
+                if status in (3, 4) and urls:
+                    first = urls[0]
+                    if isinstance(first, dict):
+                        url = first.get("image") or first.get("imgV1") or first.get("thumbnail") or ""
+                    else:
+                        url = str(first)
+                    if url:
+                        return {"success": True, "imageUrl": url}
+                elif status == 5:
+                    pass  # still processing
         except Exception:
             pass
 
@@ -114,12 +120,15 @@ def check_job_status(task_id, session_id, token, base_url):
             if data.get("errCode") == 0:
                 d = data.get("data", {})
                 status = d.get("status")
-                if status == 3:
-                    urls = d.get("resource_urls", [])
-                    if urls:
-                        return {"status": "completed", "image_url": urls[0]}
-                elif status == 4:
-                    return {"status": "failed", "error": "Generation failed"}
+                urls = d.get("resource_urls", [])
+                if status in (3, 4) and urls:
+                    first = urls[0]
+                    if isinstance(first, dict):
+                        url = first.get("image") or first.get("imgV1") or first.get("thumbnail") or ""
+                    else:
+                        url = str(first)
+                    if url:
+                        return {"status": "completed", "image_url": url}
                 return {"status": "processing"}
     except Exception:
         pass
