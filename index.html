@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digen Image Generator</title>
+    <style>
+        /* ── Reset & base ── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #e0e0e0;
+        }
+        .container {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 720px;
+            width: 100%;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h1 span { background: linear-gradient(135deg, #f093fb, #f5576c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .subtitle {
+            font-size: 14px;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 28px;
+        }
+
+        /* ── Form ── */
+        .form-group { margin-bottom: 18px; }
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 6px;
+            letter-spacing: 0.3px;
+        }
+        textarea, select, input[type="text"] {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 15px;
+            transition: border-color 0.2s, background 0.2s;
+            outline: none;
+            font-family: inherit;
+        }
+        textarea:focus, select:focus, input[type="text"]:focus {
+            border-color: rgba(245,87,108,0.5);
+            background: rgba(255,255,255,0.1);
+        }
+        textarea::placeholder, input::placeholder { color: rgba(255,255,255,0.3); }
+        textarea { resize: vertical; min-height: 80px; }
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.5)' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            cursor: pointer;
+        }
+        select option { background: #1e1e2e; color: #e0e0e0; }
+        .row { display: flex; gap: 14px; }
+        .row .form-group { flex: 1; }
+
+        /* ── Buttons ── */
+        .btn {
+            padding: 12px 32px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            color: #fff;
+            width: 100%;
+            margin-top: 4px;
+            box-shadow: 0 4px 15px rgba(245,87,108,0.3);
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(245,87,108,0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn-secondary {
+            background: rgba(255,255,255,0.08);
+            color: #e0e0e0;
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+        /* ── Result area ── */
+        .result-area {
+            margin-top: 24px;
+            border-radius: 16px;
+            background: rgba(0,0,0,0.25);
+            min-height: 100px;
+            overflow: hidden;
+            position: relative;
+            transition: min-height 0.4s ease;
+        }
+
+        /* ── Loading animation: ChatGPT-style bouncing dots ── */
+        .loading-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 50px 20px;
+            gap: 20px;
+        }
+        .loading-container.active { display: flex; }
+
+        .loading-dots {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .loading-dots .dot {
+            width: 12px;
+            height: 12px;
+            background: #f5576c;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .loading-dots .dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dots .dot:nth-child(2) { animation-delay: -0.16s; }
+        .loading-dots .dot:nth-child(3) { animation-delay: 0s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        .loading-text {
+            font-size: 15px;
+            color: rgba(255,255,255,0.6);
+            letter-spacing: 0.5px;
+            animation: pulse-text 2s ease-in-out infinite;
+        }
+        @keyframes pulse-text {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        /* Shimmer bar below dots */
+        .shimmer-bar {
+            width: 200px;
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .shimmer-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(245,87,108,0.5), transparent);
+            animation: shimmer 1.6s infinite;
+        }
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        /* ── Image result ── */
+        .image-result {
+            display: none;
+            padding: 16px;
+        }
+        .image-result.active {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .image-result img {
+            width: 100%;
+            border-radius: 12px;
+            display: block;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .image-result .image-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+        .image-result .image-actions a {
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            background: rgba(255,255,255,0.08);
+            color: #e0e0e0;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: background 0.2s;
+        }
+        .image-result .image-actions a:hover { background: rgba(255,255,255,0.15); }
+
+        /* ── Error / JSON ── */
+        .error-message {
+            display: none;
+            padding: 16px;
+            color: #fca5a5;
+            font-size: 14px;
+            background: rgba(239,68,68,0.1);
+            border-radius: 12px;
+            border: 1px solid rgba(239,68,68,0.2);
+        }
+        .error-message.active { display: block; }
+
+        .debug-json {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 12px;
+            color: rgba(255,255,255,0.5);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow: auto;
+        }
+
+        /* ── Model badges ── */
+        .model-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+        .model-badges span {
+            padding: 3px 10px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 20px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 600px) {
+            .container { padding: 24px; }
+            .row { flex-direction: column; gap: 0; }
+            h1 { font-size: 22px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span>✦</span> Digen Image</h1>
+        <p class="subtitle">Generate stunning AI images with one click</p>
+
+        <form id="generateForm">
+            <div class="form-group">
+                <label for="prompt">Prompt</label>
+                <textarea id="prompt" placeholder="Describe the image you want to create..." required>A cute cat wearing a hat, digital art</textarea>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="model">Model</label>
+                    <select id="model">
+                        <option value="flux">Flux</option>
+                        <option value="flux2">Flux 2</option>
+                        <option value="flux2-klein">Flux 2 Klein</option>
+                        <option value="flux-schnell">Flux Schnell</option>
+                        <option value="zimage">ZImage</option>
+                        <option value="sora-image">Sora Image</option>
+                        <option value="gpt-image">GPT Image 1.5</option>
+                        <option value="gpt-image2">GPT Image 2</option>
+                        <option value="seedream5">SeaDream 5</option>
+                        <option value="image-motion">Image Motion (free)</option>
+                        <option value="nano-banana">Nano Banana</option>
+                        <option value="nano-banana2">Nano Banana 2</option>
+                        <option value="nano-banana2-r">Nano Banana 2 R</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="mode">Mode</label>
+                    <select id="mode">
+                        <option value="sync">Sync (wait for result)</option>
+                        <option value="async">Async (poll manually)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="token">Token <span style="font-weight:400;color:rgba(255,255,255,0.3);">(optional — defaults to config)</span></label>
+                <input type="text" id="token" placeholder="Override API token">
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="generateBtn">
+                <span>✨</span> Generate Image
+            </button>
+        </form>
+
+        <!-- Result area -->
+        <div class="result-area" id="resultArea">
+            <!-- Loading animation -->
+            <div class="loading-container" id="loadingContainer">
+                <div class="loading-dots">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+                <div class="loading-text" id="loadingText">Generating your image...</div>
+                <div class="shimmer-bar"></div>
+            </div>
+
+            <!-- Image result -->
+            <div class="image-result" id="imageResult">
+                <img id="generatedImage" src="" alt="Generated Image">
+                <div class="image-actions">
+                    <a id="downloadLink" href="#" download="generated.png">⬇ Download</a>
+                    <a id="openLink" href="#" target="_blank" rel="noopener">↗ Open in new tab</a>
+                </div>
+            </div>
+
+            <!-- Error -->
+            <div class="error-message" id="errorMessage"></div>
+
+            <!-- Debug JSON -->
+            <div class="debug-json" id="debugJson"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('generateForm');
+        const generateBtn = document.getElementById('generateBtn');
+        const promptInput = document.getElementById('prompt');
+        const modelInput = document.getElementById('model');
+        const modeInput = document.getElementById('mode');
+        const tokenInput = document.getElementById('token');
+        const resultArea = document.getElementById('resultArea');
+        const loadingContainer = document.getElementById('loadingContainer');
+        const loadingText = document.getElementById('loadingText');
+        const imageResult = document.getElementById('imageResult');
+        const generatedImage = document.getElementById('generatedImage');
+        const downloadLink = document.getElementById('downloadLink');
+        const openLink = document.getElementById('openLink');
+        const errorMessage = document.getElementById('errorMessage');
+        const debugJson = document.getElementById('debugJson');
+
+        // ── Loading messages ──
+        const loadingMessages = [
+            'Generating your image...',
+            'Warming up the neural network...',
+            'Painting pixels with AI magic...',
+            'Almost there, adding finishing touches...',
+            'Dreaming up something amazing...',
+            'Channeling creative vibes...',
+            'Brewing digital art...',
+        ];
+        let messageInterval = null;
+
+        function startLoadingAnimation() {
+            loadingContainer.classList.add('active');
+            imageResult.classList.remove('active');
+            errorMessage.classList.remove('active');
+            debugJson.textContent = '';
+
+            // Rotate loading messages
+            let idx = 0;
+            loadingText.textContent = loadingMessages[0];
+            messageInterval = setInterval(() => {
+                idx = (idx + 1) % loadingMessages.length;
+                loadingText.textContent = loadingMessages[idx];
+            }, 3000);
+
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<span>⏳</span> Generating...';
+        }
+
+        function stopLoadingAnimation() {
+            loadingContainer.classList.remove('active');
+            if (messageInterval) {
+                clearInterval(messageInterval);
+                messageInterval = null;
+            }
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<span>✨</span> Generate Image';
+        }
+
+        function showImage(url) {
+            stopLoadingAnimation();
+            generatedImage.src = url;
+            downloadLink.href = url;
+            openLink.href = url;
+            imageResult.classList.add('active');
+            errorMessage.classList.remove('active');
+        }
+
+        function showError(msg) {
+            stopLoadingAnimation();
+            errorMessage.textContent = '❌ ' + msg;
+            errorMessage.classList.add('active');
+            imageResult.classList.remove('active');
+        }
+
+        function showDebug(data) {
+            debugJson.textContent = JSON.stringify(data, null, 2);
+        }
+
+        // ── Submit ──
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const prompt = promptInput.value.trim();
+            const model = modelInput.value;
+            const mode = modeInput.value;
+            const token = tokenInput.value.trim();
+
+            if (!prompt) {
+                showError('Please enter a prompt.');
+                return;
+            }
+
+            startLoadingAnimation();
+
+            try {
+                let url = `/api/generate?prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}&mode=${mode}`;
+                if (token) url += `&token=${encodeURIComponent(token)}`;
+
+                const res = await fetch(url);
+                const data = await res.json();
+
+                showDebug(data);
+
+                if (data.success && data.image_url) {
+                    showImage(data.image_url);
+                } else if (data.job_id) {
+                    // Async mode — start polling
+                    loadingText.textContent = 'Image is being generated... (polling)';
+                    pollJob(data.job_id, data.session_id, token);
+                } else {
+                    showError(data.error || 'Generation failed. Check debug output.');
+                }
+            } catch (err) {
+                showError('Network error: ' + err.message);
+            }
+        });
+
+        // ── Polling for async mode ──
+        async function pollJob(jobId, sessionId, token) {
+            const maxAttempts = 40;
+            let attempt = 0;
+
+            const poll = async () => {
+                if (attempt >= maxAttempts) {
+                    showError('Timed out waiting for image generation.');
+                    return;
+                }
+                attempt++;
+
+                // Update message periodically
+                const msgs = [
+                    'Checking generation status...',
+                    'Still working on it...',
+                    'Almost done...',
+                    'Patience, great art takes time...',
+                    'Finalizing your image...',
+                ];
+                loadingText.textContent = msgs[attempt % msgs.length];
+
+                try {
+                    let url = `/api/status?job_id=${encodeURIComponent(jobId)}&session_id=${encodeURIComponent(sessionId)}`;
+                    if (token) url += `&token=${encodeURIComponent(token)}`;
+
+                    const res = await fetch(url);
+                    const data = await res.json();
+
+                    showDebug(data);
+
+                    if (data.status === 'completed' && data.image_url) {
+                        showImage(data.image_url);
+                        return;
+                    }
+
+                    // Still processing — wait and retry
+                    setTimeout(poll, 3000);
+                } catch (err) {
+                    showError('Polling error: ' + err.message);
+                }
+            };
+
+            setTimeout(poll, 3000);
+        }
+    </script>
+</body>
+</html>
